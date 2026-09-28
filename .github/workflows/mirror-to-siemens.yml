@@ -1,27 +1,61 @@
-name: Mirror to Siemens GitLab
+name: Sync to Siemens via REST API
 
 on:
   push:
     branches:
-      - '**'
-    tags:
-      - '**'
+      - 'main'
 
 jobs:
-  mirror:
+  api-sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout GitHub Repository
+      - name: Checkout Code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # Fetch all branches, tags, and history
 
-      - name: Push to Siemens GitLab
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: pip install python-gitlab
+
+      - name: Sync Files via GitLab API
         env:
           SIEMENS_PAT: ${{ secrets.SIEMENS_PAT }}
         run: |
-          REMOTE_URL="https://oauth2:${SIEMENS_PAT}@code.siemens.com/peter.budai/pushing-from-internet.git"
+          python - << 'EOF'
+          import os
+          import gitlab
+
+          # Connect to Siemens GitLab instance via API
+          gl = gitlab.Gitlab('https://code.siemens.com', private_token=os.environ['SIEMENS_PAT'])
           
-          git remote add siemens "$REMOTE_URL"
-          git push siemens --all --force
-          git push siemens --tags --force
+          # Project path encoded or project ID
+          project = gl.projects.get('peter.budai/pushing-from-internet')
+
+          # Collect changed/all repository files
+          actions = []
+          for root, dirs, files in os.walk('.'):
+              if '.git' in root or '.github' in root:
+                  continue
+              for file in files:
+                  filepath = os.path.relpath(os.path.join(root, file), '.')
+                  with open(os.path.join(root, file), 'r', encoding='utf-8', errors='ignore') as f:
+                      content = f.read()
+                  
+                  # Check if file exists to decide whether to create or update
+                  try:
+                      project.files.get(file_path=filepath, ref='main')
+                      actions.append({'action': 'update', 'file_path': filepath, 'content': content})
+                  except gitlab.exceptions.GitlabGetError:
+                      actions.append({'action': 'create', 'file_path': filepath, 'content': content})
+
+          if actions:
+              commit = project.commits.create({
+                  'branch': 'main',
+                  'commit_message': 'Auto-sync from GitHub Actions',
+                  'actions': actions
+              })
+              print(f"Successfully committed changes: {commit.id}")
+          EOF
