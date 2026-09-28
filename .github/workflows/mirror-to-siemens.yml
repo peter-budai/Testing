@@ -1,0 +1,30 @@
+name: Mirror to Siemens GitLab
+
+on:
+  push:
+    branches:
+      - '**'
+  tags:
+    - '**'
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout GitHub Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch all branches, tags, and history
+
+      - name: Push to Siemens GitLab
+        env:
+          SIEMENS_PAT: ${{ secrets.SIEMENS_PAT }}
+        run: |
+          # Convert username/token into HTTPS URL format
+          # Using OAuth token / PAT authentication for HTTPS
+          REMOTE_URL="https://oauth2:${SIEMENS_PAT}@code.siemens.com/peter.budai/pushing-from-internet.git"
+          
+          # Add Siemens remote and push all branches and tags
+          git remote add siemens "$REMOTE_URL"
+          git push siemens --all --force
+          git push siemens --tags --force
